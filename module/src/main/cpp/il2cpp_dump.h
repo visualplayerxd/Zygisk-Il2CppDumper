@@ -2,11 +2,12 @@
 // Created by Perfare on 2020/7/4.
 //
 
-#ifndef ZYGISK_IL2CPPDUMPER_IL2CPP_DUMP_H
-#define ZYGISK_IL2CPPDUMPER_IL2CPP_DUMP_H
+#ifndef RIRU_IL2CPPDUMPER_IL2CPP_H
+#define RIRU_IL2CPPDUMPER_IL2CPP_H
 
-void il2cpp_api_init(void *handle);
+#include "game.h"
 
-void il2cpp_dump(const char *outDir);
+void il2cpp_dump(void *handle, char *outDir);
+void dump_libunity(char *outDir);  
 
-#endif //ZYGISK_IL2CPPDUMPER_IL2CPP_DUMP_H
+#endif //RIRU_IL2CPPDUMPER_IL2CPP_H
