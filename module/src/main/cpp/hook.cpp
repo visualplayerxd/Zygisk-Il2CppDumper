@@ -48,22 +48,22 @@ static int GetAndroidApiLevel() {
 void *hack_thread(void *arg) {
     LOGI("Hack thread started: %d", gettid());
     
-    // Ждём загрузки libil2cpp.so
+    // Ждём загрузки libunity.so (это и есть IL2CPP)
     int attempts = 0;
     while (!il2cpp_handle && attempts < 30) {
-        void *handle = dlopen("libil2cpp.so", RTLD_NOLOAD);
+        void *handle = dlopen("libunity.so", RTLD_NOLOAD);
         if (handle) {
             il2cpp_handle = handle;
-            LOGI("Found libil2cpp.so at %p after %d attempts", handle, attempts);
-        } else {
-            attempts++;
-            LOGI("Waiting for libil2cpp.so, attempt %d/30", attempts);
-            sleep(1);
+            LOGI("Found libunity.so (IL2CPP) at %p after %d attempts", handle, attempts);
+            break;
         }
+        attempts++;
+        LOGI("Waiting for libunity.so, attempt %d/30", attempts);
+        sleep(1);
     }
     
     if (!il2cpp_handle) {
-        LOGE("libil2cpp.so not found after 30 seconds");
+        LOGE("libunity.so not found after 30 seconds");
         return nullptr;
     }
     
@@ -72,9 +72,6 @@ void *hack_thread(void *arg) {
     
     LOGI("Starting IL2CPP dump, game_data_dir=%s", game_data_dir ? game_data_dir : "NULL");
     il2cpp_dump(il2cpp_handle, game_data_dir);
-    
-    LOGI("Starting libunity dump...");
-    dump_libunity(game_data_dir);
     
     LOGI("Hack thread finished");
     return nullptr;
