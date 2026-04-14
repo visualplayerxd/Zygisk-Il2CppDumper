@@ -6,27 +6,16 @@
 #define RIRU_IL2CPPDUMPER_HOOK_H
 
 #include <jni.h>
-#include <dlfcn.h>
-#include <cstring>
-#include <unistd.h>
 #include "log.h"
-#include "il2cpp_dump.h"
 
-static int enable_hack = 0;
-static void *il2cpp_handle = nullptr;
-static char game_data_dir[PATH_MAX] = {0};
+// Убираем static, оставляем extern
+extern int enable_hack;
+extern void *il2cpp_handle;
+extern char *game_data_dir;
 
-// Объявление функции проверки игры
 int isGame(JNIEnv *env, jstring appDataDir);
-
-// Объявление потока для дампа
 void *hack_thread(void *arg);
 
-// Хук на dlopen
-HOOK_DEF(void*, dlopen, const char* filename, int flag);
-
-#define HOOK_DEF(ret, func, ...) \
-  ret (*orig_##func)(__VA_ARGS__); \
-  ret new_##func(__VA_ARGS__)
+// Убираем HOOK_DEF для dlopen отсюда, он будет в cpp файле
 
 #endif //RIRU_IL2CPPDUMPER_HOOK_H
