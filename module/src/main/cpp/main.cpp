@@ -2,7 +2,6 @@
 #include <jni.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <dlfcn.h>
 #include "zygisk.hpp"
 #include "il2cpp_dump.h"
 #include "hook.h"
@@ -11,7 +10,7 @@ using zygisk::Api;
 using zygisk::AppSpecializeArgs;
 using zygisk::ServerSpecializeArgs;
 
-// Определяем глобальные переменные (один раз)
+// ОПРЕДЕЛЯЕМ глобальные переменные (только здесь, один раз)
 int enable_hack = 0;
 void *il2cpp_handle = nullptr;
 char *game_data_dir = nullptr;
