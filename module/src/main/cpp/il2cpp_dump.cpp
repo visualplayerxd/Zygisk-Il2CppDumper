@@ -488,7 +488,7 @@ void il2cpp_dump(void *handle, char *outDir) {
             il2cpp_base = reinterpret_cast<uint64_t>(dlInfo.dli_fbase);
         } else {
             LOGW("dladdr error, using get_module_base.");
-            il2cpp_base = get_module_base("libil2cpp.so");
+            il2cpp_base = get_module_base("libunity.so");
         }
         LOGI("il2cpp_base: %" PRIx64"", il2cpp_base);
     } else {
