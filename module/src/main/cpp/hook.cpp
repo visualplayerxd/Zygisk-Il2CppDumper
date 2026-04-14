@@ -48,7 +48,7 @@ static int GetAndroidApiLevel() {
 void *hack_thread(void *arg) {
     LOGI("Hack thread started: %d", gettid());
     
-    // Ждём загрузки libunity.so (это и есть IL2CPP)
+    // Ждём загрузки libunity.so
     int attempts = 0;
     while (!il2cpp_handle && attempts < 30) {
         void *handle = dlopen("libunity.so", RTLD_NOLOAD);
@@ -67,8 +67,9 @@ void *hack_thread(void *arg) {
         return nullptr;
     }
     
-    LOGI("Waiting 5 seconds for full initialization...");
-    sleep(5);
+    // Ждём 30 секунд для полной инициализации IL2CPP
+    LOGI("Waiting 30 seconds for full IL2CPP initialization...");
+    sleep(30);
     
     LOGI("Starting IL2CPP dump, game_data_dir=%s", game_data_dir ? game_data_dir : "NULL");
     il2cpp_dump(il2cpp_handle, game_data_dir);
