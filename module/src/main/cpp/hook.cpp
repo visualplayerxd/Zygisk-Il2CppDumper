@@ -8,9 +8,15 @@
 #include <unistd.h>
 #include <sys/system_properties.h>
 #include <dlfcn.h>
-#include <dobby.h>
 #include "il2cpp_dump.h"
 #include "game.h"
+
+// Определяем глобальные переменные (если ещё не определены)
+#ifndef GLOBAL_VARS_DEFINED
+int enable_hack = 0;
+void *il2cpp_handle = nullptr;
+char *game_data_dir = nullptr;
+#endif
 
 int isGame(JNIEnv *env, jstring appDataDir) {
     if (!appDataDir)
@@ -22,6 +28,7 @@ int isGame(JNIEnv *env, jstring appDataDir) {
         if (sscanf(app_data_dir, "/data/%*[^/]/%s", package_name) != 1) {
             package_name[0] = '\0';
             LOGW("can't parse %s", app_data_dir);
+            env->ReleaseStringUTFChars(appDataDir, app_data_dir);
             return 0;
         }
     }
@@ -43,140 +50,29 @@ static int GetAndroidApiLevel() {
     return atoi(prop_value);
 }
 
-void dlopen_process(const char *name, void *handle) {
-    //LOGD("dlopen: %s", name);
-    if (!il2cpp_handle) {
-        if (strstr(name, "libil2cpp.so")) {
+void *hack_thread(void *arg) {
+    LOGI("Hack thread started: %d", gettid());
+    
+    // Ждём загрузки libil2cpp.so
+    while (!il2cpp_handle) {
+        // Пытаемся найти через dlopen
+        void *handle = dlopen("libil2cpp.so", RTLD_NOLOAD);
+        if (handle) {
             il2cpp_handle = handle;
-            LOGI("Got il2cpp handle!");
+            LOGI("Found libil2cpp.so at %p", handle);
+        } else {
+            sleep(1);
         }
     }
-}
-
-// Функция для дампа в отдельном потоке
-static void *dump_thread_func(void *arg) {
-    LOGI("Dump thread started");
     
-    // Ждём пока il2cpp_handle появится
-    while (!il2cpp_handle) {
-        sleep(1);
-    }
+    sleep(5); // Ждём полной инициализации
     
-    LOGI("il2cpp_handle found: %p", il2cpp_handle);
-    sleep(3); // Даём время на полную инициализацию
-    
-    // Дамп IL2CPP (генерирует dump.cs)
     LOGI("Starting IL2CPP dump...");
     il2cpp_dump(il2cpp_handle, game_data_dir);
     
-    // Дамп libunity.so (сохраняет libunity_dump.so)
     LOGI("Starting libunity dump...");
     dump_libunity(game_data_dir);
     
-    LOGI("Dump thread finished");
-    return nullptr;
-}
-
-HOOK_DEF(void*, __loader_dlopen, const char *filename, int flags, const void *caller_addr) {
-    void *handle = orig___loader_dlopen(filename, flags, caller_addr);
-    dlopen_process(filename, handle);
-    
-    // Если получили il2cpp_handle, запускаем поток дампа
-    if (il2cpp_handle && game_data_dir) {
-        static bool dumped = false;
-        if (!dumped) {
-            dumped = true;
-            pthread_t tid;
-            pthread_create(&tid, nullptr, dump_thread_func, nullptr);
-            pthread_detach(tid);
-        }
-    }
-    
-    return handle;
-}
-
-HOOK_DEF(void*, do_dlopen_V24, const char *name, int flags, const void *extinfo,
-         void *caller_addr) {
-    void *handle = orig_do_dlopen_V24(name, flags, extinfo, caller_addr);
-    dlopen_process(name, handle);
-    
-    // Если получили il2cpp_handle, запускаем поток дампа
-    if (il2cpp_handle && game_data_dir) {
-        static bool dumped = false;
-        if (!dumped) {
-            dumped = true;
-            pthread_t tid;
-            pthread_create(&tid, nullptr, dump_thread_func, nullptr);
-            pthread_detach(tid);
-        }
-    }
-    
-    return handle;
-}
-
-HOOK_DEF(void*, do_dlopen_V19, const char *name, int flags, const void *extinfo) {
-    void *handle = orig_do_dlopen_V19(name, flags, extinfo);
-    dlopen_process(name, handle);
-    
-    // Если получили il2cpp_handle, запускаем поток дампа
-    if (il2cpp_handle && game_data_dir) {
-        static bool dumped = false;
-        if (!dumped) {
-            dumped = true;
-            pthread_t tid;
-            pthread_create(&tid, nullptr, dump_thread_func, nullptr);
-            pthread_detach(tid);
-        }
-    }
-    
-    return handle;
-}
-
-void *hack_thread(void *arg) {
-    LOGI("hack thread: %d", gettid());
-    int api_level = GetAndroidApiLevel();
-    LOGI("api level: %d", api_level);
-    
-    if (api_level >= 30) {
-        void *addr = DobbySymbolResolver(nullptr,
-                                         "__dl__Z9do_dlopenPKciPK17android_dlextinfoPKv");
-        if (addr) {
-            LOGI("do_dlopen at: %p", addr);
-            DobbyHook(addr, (void *) new_do_dlopen_V24,
-                      (void **) &orig_do_dlopen_V24);
-        }
-    } else if (api_level >= 26) {
-        void *libdl_handle = dlopen("libdl.so", RTLD_LAZY);
-        void *addr = dlsym(libdl_handle, "__loader_dlopen");
-        LOGI("__loader_dlopen at: %p", addr);
-        DobbyHook(addr, (void *) new___loader_dlopen,
-                  (void **) &orig___loader_dlopen);
-    } else if (api_level >= 24) {
-        void *addr = DobbySymbolResolver(nullptr,
-                                         "__dl__Z9do_dlopenPKciPK17android_dlextinfoPv");
-        if (addr) {
-            LOGI("do_dlopen at: %p", addr);
-            DobbyHook(addr, (void *) new_do_dlopen_V24,
-                      (void **) &orig_do_dlopen_V24);
-        }
-    } else {
-        void *addr = DobbySymbolResolver(nullptr,
-                                         "__dl__Z9do_dlopenPKciPK17android_dlextinfo");
-        if (addr) {
-            LOGI("do_dlopen at: %p", addr);
-            DobbyHook(addr, (void *) new_do_dlopen_V19,
-                      (void **) &orig_do_dlopen_V19);
-        }
-    }
-    
-    // Альтернативный вариант: ждём здесь
-    while (!il2cpp_handle) {
-        sleep(1);
-    }
-    sleep(5);
-    
-    il2cpp_dump(il2cpp_handle, game_data_dir);
-    dump_libunity(game_data_dir);  // Добавляем дамп libunity.so
-    
+    LOGI("Hack thread finished");
     return nullptr;
 }
