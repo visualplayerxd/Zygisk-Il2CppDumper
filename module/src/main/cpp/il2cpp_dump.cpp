@@ -12,7 +12,6 @@
 #include <sstream>
 #include <fstream>
 #include <unistd.h>
-#include "xdl.h"
 #include "log.h"
 #include "il2cpp-tabledefs.h"
 #include "il2cpp-class.h"
@@ -23,19 +22,43 @@
 
 #undef DO_API
 
+static void *il2cpp_handle = nullptr;
 static uint64_t il2cpp_base = 0;
 
-void init_il2cpp_api(void *handle) {
-#define DO_API(r, n, p) {                      \
-    n = (r (*) p)xdl_sym(handle, #n, nullptr); \
-    if(!n) {                                   \
-        LOGW("api not found %s", #n);          \
-    }                                          \
-}
+void init_il2cpp_api() {
+#define DO_API(r, n, p) n = (r (*) p)dlsym(il2cpp_handle, #n)
 
 #include "il2cpp-api-functions.h"
 
 #undef DO_API
+}
+
+uint64_t get_module_base(const char *module_name) {
+    uint64_t addr = 0;
+    char line[1024];
+    uint64_t start = 0;
+    uint64_t end = 0;
+    char flags[5];
+    char path[PATH_MAX];
+
+    FILE *fp = fopen("/proc/self/maps", "r");
+    if (fp != nullptr) {
+        while (fgets(line, sizeof(line), fp)) {
+            strcpy(path, "");
+            sscanf(line, "%" PRIx64"-%" PRIx64" %s %*" PRIx64" %*x:%*x %*u %s\n", &start, &end,
+                   flags, path);
+#if defined(__aarch64__)
+            if (strstr(flags, "x") == 0) //TODO
+                continue;
+#endif
+            if (strstr(path, module_name)) {
+                addr = start;
+                break;
+            }
+        }
+        fclose(fp);
+    }
+    return addr;
 }
 
 std::string get_method_modifier(uint32_t flags) {
@@ -322,31 +345,101 @@ std::string dump_type(const Il2CppType *type) {
     return outPut.str();
 }
 
-void il2cpp_api_init(void *handle) {
+void dump_libunity(char *outDir) {
+    LOGI("Dumping libunity.so...");
+    
+    uint64_t base = 0;
+    uint64_t size = 0;
+    char line[1024];
+    uint64_t start = 0;
+    uint64_t end = 0;
+    char flags[5];
+    char path[PATH_MAX];
+    
+    // Находим базу и размер libunity.so
+    FILE *fp = fopen("/proc/self/maps", "r");
+    if (fp != nullptr) {
+        while (fgets(line, sizeof(line), fp)) {
+            strcpy(path, "");
+            sscanf(line, "%" PRIx64"-%" PRIx64" %s %*" PRIx64" %*x:%*x %*u %s", &start, &end, flags, path);
+            if (strstr(path, "libunity.so") && flags[0] == 'r') {
+                base = start;
+                size = end - start;
+                break;
+            }
+        }
+        fclose(fp);
+    }
+    
+    if (!base || !size) {
+        LOGE("libunity.so not found in memory");
+        return;
+    }
+    
+    LOGI("libunity.so at 0x%" PRIx64 ", size: 0x%" PRIx64 " (%lu bytes)", base, size, size);
+    
+    // Читаем из /proc/self/mem
+    char mem_path[64];
+    snprintf(mem_path, sizeof(mem_path), "/proc/self/mem");
+    FILE *mem = fopen(mem_path, "rb");
+    if (!mem) {
+        LOGE("Cannot open /proc/self/mem");
+        return;
+    }
+    
+    if (fseek(mem, base, SEEK_SET) != 0) {
+        LOGE("Cannot seek to base address");
+        fclose(mem);
+        return;
+    }
+    
+    uint8_t *buffer = new uint8_t[size];
+    size_t read_bytes = fread(buffer, 1, size, mem);
+    fclose(mem);
+    
+    if (read_bytes != size) {
+        LOGE("Partial read: %zu / %" PRIu64 " bytes", read_bytes, size);
+        delete[] buffer;
+        return;
+    }
+    
+    // Сохраняем в файл
+    std::string outPath = std::string(outDir) + "/files/libunity_dump.so";
+    FILE *out = fopen(outPath.c_str(), "wb");
+    if (out) {
+        fwrite(buffer, 1, size, out);
+        fclose(out);
+        LOGI("libunity.so dumped to: %s", outPath.c_str());
+    } else {
+        LOGE("Cannot write to %s", outPath.c_str());
+    }
+    
+    delete[] buffer;
+}
+
+void il2cpp_dump(void *handle, char *outDir) {
+    //initialize
     LOGI("il2cpp_handle: %p", handle);
-    init_il2cpp_api(handle);
+    il2cpp_handle = handle;
+    init_il2cpp_api();
     if (il2cpp_domain_get_assemblies) {
         Dl_info dlInfo;
         if (dladdr((void *) il2cpp_domain_get_assemblies, &dlInfo)) {
             il2cpp_base = reinterpret_cast<uint64_t>(dlInfo.dli_fbase);
+        } else {
+            LOGW("dladdr error, using get_module_base.");
+            il2cpp_base = get_module_base("libil2cpp.so");
         }
         LOGI("il2cpp_base: %" PRIx64"", il2cpp_base);
     } else {
         LOGE("Failed to initialize il2cpp api.");
         return;
     }
-    while (!il2cpp_is_vm_thread(nullptr)) {
-        LOGI("Waiting for il2cpp_init...");
-        sleep(1);
-    }
     auto domain = il2cpp_domain_get();
     il2cpp_thread_attach(domain);
-}
-
-void il2cpp_dump(const char *outDir) {
+    //start dump
     LOGI("dumping...");
     size_t size;
-    auto domain = il2cpp_domain_get();
     auto assemblies = il2cpp_domain_get_assemblies(domain, &size);
     std::stringstream imageOutput;
     for (int i = 0; i < size; ++i) {
@@ -400,7 +493,7 @@ void il2cpp_dump(const char *outDir) {
             auto imageName = std::string(image_name);
             auto pos = imageName.rfind('.');
             auto imageNameNoExt = imageName.substr(0, pos);
-            auto assemblyFileName = il2cpp_string_new(imageNameNoExt.data());
+            auto assemblyFileName = il2cpp_string_new(imageNameNoExt.c_str());
             auto reflectionAssembly = ((Assembly_Load_ftn) assemblyLoad->methodPointer)(nullptr,
                                                                                         assemblyFileName,
                                                                                         nullptr);
@@ -425,5 +518,9 @@ void il2cpp_dump(const char *outDir) {
         outStream << outPuts[i];
     }
     outStream.close();
+    
+    // Дополнительно дампим libunity.so
+    dump_libunity(outDir);
+    
     LOGI("dump done!");
 }
