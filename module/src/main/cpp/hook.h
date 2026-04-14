@@ -8,14 +8,12 @@
 #include <jni.h>
 #include "log.h"
 
-// Убираем static, оставляем extern
+// Объявляем переменные как extern (без определения)
 extern int enable_hack;
 extern void *il2cpp_handle;
 extern char *game_data_dir;
 
 int isGame(JNIEnv *env, jstring appDataDir);
 void *hack_thread(void *arg);
-
-// Убираем HOOK_DEF для dlopen отсюда, он будет в cpp файле
 
 #endif //RIRU_IL2CPPDUMPER_HOOK_H
