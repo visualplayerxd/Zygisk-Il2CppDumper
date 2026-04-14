@@ -11,12 +11,7 @@
 #include "il2cpp_dump.h"
 #include "game.h"
 
-// Определяем глобальные переменные (если ещё не определены)
-#ifndef GLOBAL_VARS_DEFINED
-int enable_hack = 0;
-void *il2cpp_handle = nullptr;
-char *game_data_dir = nullptr;
-#endif
+// НЕ определяем переменные здесь, только используем extern из hook.h
 
 int isGame(JNIEnv *env, jstring appDataDir) {
     if (!appDataDir)
@@ -55,7 +50,6 @@ void *hack_thread(void *arg) {
     
     // Ждём загрузки libil2cpp.so
     while (!il2cpp_handle) {
-        // Пытаемся найти через dlopen
         void *handle = dlopen("libil2cpp.so", RTLD_NOLOAD);
         if (handle) {
             il2cpp_handle = handle;
@@ -65,7 +59,7 @@ void *hack_thread(void *arg) {
         }
     }
     
-    sleep(5); // Ждём полной инициализации
+    sleep(5);
     
     LOGI("Starting IL2CPP dump...");
     il2cpp_dump(il2cpp_handle, game_data_dir);
