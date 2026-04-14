@@ -346,77 +346,135 @@ std::string dump_type(const Il2CppType *type) {
 }
 
 void dump_libunity(char *outDir) {
-    LOGI("Dumping libunity.so...");
+    LOGI("dump_libunity called, outDir=%s", outDir ? outDir : "NULL");
+    
+    if (!outDir) {
+        LOGE("outDir is NULL, cannot dump libunity.so");
+        return;
+    }
+    
+    // Проверяем права записи и создаём папку files
+    char files_path[PATH_MAX];
+    snprintf(files_path, sizeof(files_path), "%s/files", outDir);
+    
+    // Создаём папку files (0755 = rwxr-xr-x)
+    mkdir(files_path, 0755);
+    
+    // Тестовый файл для проверки прав
+    char test_path[PATH_MAX];
+    snprintf(test_path, sizeof(test_path), "%s/test_write.txt", files_path);
+    FILE *test = fopen(test_path, "w");
+    if (test) {
+        fprintf(test, "Write test successful at %ld\n", time(nullptr));
+        fclose(test);
+        LOGI("Write test passed: %s", test_path);
+    } else {
+        LOGE("Cannot write to %s, error: %s", test_path, strerror(errno));
+        LOGE("Check permissions on %s", files_path);
+        return;
+    }
+    
+    LOGI("Searching for libunity.so in /proc/self/maps...");
     
     uint64_t base = 0;
     uint64_t size = 0;
     char line[1024];
     uint64_t start = 0;
     uint64_t end = 0;
-    char flags[5];
+    char flags[10];
     char path[PATH_MAX];
     
-    // Находим базу и размер libunity.so
     FILE *fp = fopen("/proc/self/maps", "r");
-    if (fp != nullptr) {
-        while (fgets(line, sizeof(line), fp)) {
-            strcpy(path, "");
-            sscanf(line, "%" PRIx64"-%" PRIx64" %s %*" PRIx64" %*x:%*x %*u %s", &start, &end, flags, path);
-            if (strstr(path, "libunity.so") && flags[0] == 'r') {
-                base = start;
-                size = end - start;
-                break;
-            }
-        }
-        fclose(fp);
-    }
-    
-    if (!base || !size) {
-        LOGE("libunity.so not found in memory");
+    if (fp == nullptr) {
+        LOGE("Cannot open /proc/self/maps, error: %s", strerror(errno));
         return;
     }
     
-    LOGI("libunity.so at 0x%" PRIx64 ", size: 0x%" PRIx64 " (%llu bytes)", base, size, (unsigned long long)size);
+    int found = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        path[0] = '\0';
+        sscanf(line, "%" PRIx64"-%" PRIx64" %9s %*" PRIx64" %*x:%*x %*u %255s", &start, &end, flags, path);
+        
+        // Ищем libunity.so с правами чтения
+        if (strstr(path, "libunity.so") != nullptr && flags[0] == 'r') {
+            base = start;
+            size = end - start;
+            found = 1;
+            LOGI("Found libunity.so at %s", path);
+            break;
+        }
+    }
+    fclose(fp);
+    
+    if (!found || base == 0 || size == 0) {
+        LOGE("libunity.so not found in memory");
+        LOGI("Available libraries in memory:");
+        // Выводим все загруженные .so для отладки
+        fp = fopen("/proc/self/maps", "r");
+        if (fp) {
+            while (fgets(line, sizeof(line), fp)) {
+                if (strstr(line, ".so") && strstr(line, "r-xp")) {
+                    LOGI("  %s", line);
+                }
+            }
+            fclose(fp);
+        }
+        return;
+    }
+    
+    LOGI("libunity.so found at 0x%" PRIx64 ", size: 0x%" PRIx64 " (%llu bytes)", 
+         base, size, (unsigned long long)size);
     
     // Читаем из /proc/self/mem
-    char mem_path[64];
-    snprintf(mem_path, sizeof(mem_path), "/proc/self/mem");
+    char mem_path[] = "/proc/self/mem";
     FILE *mem = fopen(mem_path, "rb");
     if (!mem) {
-        LOGE("Cannot open /proc/self/mem");
+        LOGE("Cannot open %s, error: %s", mem_path, strerror(errno));
         return;
     }
     
-    if (fseek(mem, base, SEEK_SET) != 0) {
-        LOGE("Cannot seek to base address");
+    if (fseek(mem, (long)base, SEEK_SET) != 0) {
+        LOGE("Cannot seek to base address 0x%" PRIx64 ", error: %s", base, strerror(errno));
         fclose(mem);
         return;
     }
     
-    uint8_t *buffer = new uint8_t[size];
+    uint8_t *buffer = new (std::nothrow) uint8_t[size];
+    if (!buffer) {
+        LOGE("Failed to allocate %llu bytes for buffer", (unsigned long long)size);
+        fclose(mem);
+        return;
+    }
+    
     size_t read_bytes = fread(buffer, 1, size, mem);
     fclose(mem);
     
     if (read_bytes != size) {
-        LOGE("Partial read: %zu / %" PRIu64 " bytes", read_bytes, size);
+        LOGE("Partial read: expected %llu bytes, got %zu bytes", (unsigned long long)size, read_bytes);
         delete[] buffer;
         return;
     }
     
+    LOGI("Successfully read %zu bytes from memory", read_bytes);
+    
     // Сохраняем в файл
-    std::string outPath = std::string(outDir) + "/files/libunity_dump.so";
-    FILE *out = fopen(outPath.c_str(), "wb");
+    char out_path[PATH_MAX];
+    snprintf(out_path, sizeof(out_path), "%s/libunity_dump.so", files_path);
+    FILE *out = fopen(out_path, "wb");
     if (out) {
-        fwrite(buffer, 1, size, out);
+        size_t written = fwrite(buffer, 1, size, out);
         fclose(out);
-        LOGI("libunity.so dumped to: %s", outPath.c_str());
+        if (written == size) {
+            LOGI("SUCCESS! libunity.so dumped to: %s (%llu bytes)", out_path, (unsigned long long)written);
+        } else {
+            LOGE("Partial write: expected %llu, got %zu", (unsigned long long)size, written);
+        }
     } else {
-        LOGE("Cannot write to %s", outPath.c_str());
+        LOGE("Cannot write to %s, error: %s", out_path, strerror(errno));
     }
     
     delete[] buffer;
 }
-
 void il2cpp_dump(void *handle, char *outDir) {
     //initialize
     LOGI("il2cpp_handle: %p", handle);
