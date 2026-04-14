@@ -15,6 +15,8 @@
 #include "log.h"
 #include "il2cpp-tabledefs.h"
 #include "il2cpp-class.h"
+#include <sys/stat.h>  
+#include <cerrno>      
 
 #define DO_API(r, n, p) r (*n) p
 
