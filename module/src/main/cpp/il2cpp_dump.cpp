@@ -376,7 +376,7 @@ void dump_libunity(char *outDir) {
         return;
     }
     
-    LOGI("libunity.so at 0x%" PRIx64 ", size: 0x%" PRIx64 " (%lu bytes)", base, size, size);
+    LOGI("libunity.so at 0x%" PRIx64 ", size: 0x%" PRIx64 " (%llu bytes)", base, size, (unsigned long long)size);
     
     // Читаем из /proc/self/mem
     char mem_path[64];
